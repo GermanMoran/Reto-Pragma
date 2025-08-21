@@ -1,0 +1,48 @@
+version: "3.8"
+
+services:
+  db:
+    image: postgres:15
+    container_name: postgres_db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: user
+      POSTGRES_DB: db_batch
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin
+    restart: always
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "8080:80"
+    depends_on:
+      - db
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+
+  python-app:
+    build: ./app            # <-- carpeta local del codigo scipt
+    container_name: python-app
+    depends_on:
+      - db
+    environment:
+      DB_HOST: db     
+      DB_PORT: 5432
+      DB_NAME: db_batch
+      DB_USER: postgres
+      DB_PASSWORD: user
+    volumes:
+      - ./app:/usr/src/app
+    command: ["python", "final.py"]
+
+volumes:
+  postgres_data:
+  pgadmin_data:

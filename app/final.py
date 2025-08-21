@@ -23,7 +23,9 @@ CSV_DIR = "./datos"
 SOURCE_PREFIX = "2012-"  
 STATS_NAME = "global"
 
-# Configuracion Inicial de los datos
+# Configuracion Inicial de la base de datos
+# -- Caso de prueba localhost 
+# --- Docker : cambiar localhost a nombre del servido (postgres_db) dentro archivo .env
 DB_CONF = {
     "host": os.getenv("DB_HOST", "localhost"),
     "port": int(os.getenv("DB_PORT", 5432)),
@@ -39,21 +41,21 @@ DB_CONF = {
 
 # Inicializar estadisticas 
 INIT_STATS_ROW_SQL = """
-INSERT INTO stats(name, cnt, ssum, smin, smax)
+INSERT INTO BT.stats(name, cnt, ssum, smin, smax)
 VALUES('global', 0, 0.0, NULL, NULL)
 ON CONFLICT (name) DO NOTHING;
 """
 
 #Insertar registros dentro de la tabla transaciones
 INSERT_TX_SQL = """
-INSERT INTO transactions (timestamp, price, user_id, source_file)
+INSERT INTO BT.transactions (timestamp, price, user_id, source_file)
 VALUES %s
 ON CONFLICT DO NOTHING;
 """
 
 #Actualizar estadisticas
 UPDATE_STATS_SQL = """
-UPDATE stats
+UPDATE BT.stats
 SET
   cnt = cnt + %s,
   ssum = ssum + %s,
@@ -63,14 +65,14 @@ WHERE name = %s;
 """
 
 # Obtener estadisticas desde la Tabla SQL
-GET_STATS_SQL = "SELECT cnt, ssum, smin, smax FROM stats WHERE name = %s;"
+GET_STATS_SQL = "SELECT cnt, ssum, smin, smax FROM BT.stats WHERE name = %s;"
 
 # Verificar si el archivo .csv ya esta ingestado
-CHECK_FILE_SQL = "SELECT 1 FROM ingestion_log WHERE file_name = %s;"
+CHECK_FILE_SQL = "SELECT 1 FROM BT.ingestion_log WHERE file_name = %s;"
 
 # Insertar log del archivo ingestado dentro de la tabla ingestion_log
 LOG_FILE_SQL = """
-INSERT INTO ingestion_log(file_name, rows_loaded, loaded_at)
+INSERT INTO BT.ingestion_log(file_name, rows_loaded, loaded_at)
 VALUES (%s, %s, %s)
 ON CONFLICT (file_name)
 DO UPDATE SET rows_loaded = EXCLUDED.rows_loaded,
@@ -81,7 +83,7 @@ DO UPDATE SET rows_loaded = EXCLUDED.rows_loaded,
 # Queries para crear tablas
 DDL = {
     "transactions": """
-        CREATE TABLE IF NOT EXISTS transactions (
+        CREATE TABLE IF NOT EXISTS BT.transactions (
             id SERIAL PRIMARY KEY,
             timestamp TIMESTAMP NOT NULL,
             price DOUBLE PRECISION NOT NULL,
@@ -90,14 +92,14 @@ DDL = {
         );
     """,
     "ingestion_log": """
-        CREATE TABLE IF NOT EXISTS ingestion_log (
+        CREATE TABLE IF NOT EXISTS BT.ingestion_log (
             file_name   TEXT PRIMARY KEY,
             rows_loaded INTEGER NOT NULL,
             loaded_at   TIMESTAMP NOT NULL
         );
     """,
     "stats": """
-        CREATE TABLE IF NOT EXISTS stats (
+        CREATE TABLE IF NOT EXISTS BT.stats (
             name TEXT PRIMARY KEY CHECK (name = 'global'),
             cnt  BIGINT NOT NULL,
             ssum DOUBLE PRECISION,
@@ -114,11 +116,13 @@ DDL = {
 
 """
 Esta funcioón permite crear tablas necesarias dentro de postgres 
-e inicializa fila dentro de la tabla estadísticas.
+e inicializa fila dentr 1 de la tabla estadísticas.
 """
 
 def init_db(conn):
     with conn.cursor() as cur:
+         #Crear el esquema primero
+        cur.execute("CREATE SCHEMA IF NOT EXISTS BT;")
         for sql in DDL.values():
             cur.execute(sql)
         cur.execute(INIT_STATS_ROW_SQL)
@@ -134,9 +138,9 @@ def truncate_tables(conn):
     cur = conn.cursor()
     try:
         print("[INFO] Limpiando tablas...")
-        cur.execute("TRUNCATE TABLE transactions RESTART IDENTITY CASCADE;")
-        cur.execute("TRUNCATE TABLE ingestion_log ")
-        cur.execute("TRUNCATE TABLE stats;")
+        cur.execute("TRUNCATE TABLE BT.transactions RESTART IDENTITY CASCADE;")
+        cur.execute("TRUNCATE TABLE BT.ingestion_log ")
+        cur.execute("TRUNCATE TABLE BT.stats;")
 
         conn.commit()
         print("[OK] Tablas reseteadas correctamente")
@@ -251,7 +255,7 @@ def process_file(conn, filepath, source_file_name, microbatch_size=100):
 
 
 """
-Esta función permite insertar un  microbatch y actualizar la tabla  stats.
+Esta función permite insertar un  microbatch dentro de la tabla transactions y actualizar la tabla  stats.
 """
 
 def flush_batch(conn, cur, batch, prices):
@@ -263,7 +267,7 @@ def flush_batch(conn, cur, batch, prices):
         (len(batch), sum(prices), min(prices), min(prices), max(prices), max(prices), STATS_NAME),
     )
     conn.commit()
-    print(f"[INFO] Batch de {len(batch)} filas insertado ✅")
+    print(f"[INFO] Batch de {len(batch)} filas insertado.....")
 
 
 

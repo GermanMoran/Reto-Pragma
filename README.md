@@ -2,7 +2,7 @@
 
 ## Descripción
 
-- Repositorio tine asociado los artefactos del reto tecnico para el cargo de Data Enginner
+- Este Repositorio tine asociado los artefactos del reto tecnico para el cargo de Data Enginner. El archivo final.py contiene el codigo de la solución
 
 ## Herramientas 🛠️
 
