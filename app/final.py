@@ -24,8 +24,8 @@ SOURCE_PREFIX = "2012-"
 STATS_NAME = "global"
 
 # Configuracion Inicial de la base de datos
-# -- Caso de prueba localhost 
-# --- Docker : cambiar localhost a nombre del servido (postgres_db) dentro archivo .env
+# --  Caso de prueba localhost 
+# --- Docker : cambiar localhost a nombre del servidor (postgres_db) dentro archivo .env
 DB_CONF = {
     "host": os.getenv("DB_HOST", "localhost"),
     "port": int(os.getenv("DB_PORT", 5432)),
@@ -39,7 +39,7 @@ DB_CONF = {
 # SQL Queries
 # =======================================================
 
-# Inicializar estadisticas 
+# Inicializar estadisticas  
 INIT_STATS_ROW_SQL = """
 INSERT INTO BT.stats(name, cnt, ssum, smin, smax)
 VALUES('global', 0, 0.0, NULL, NULL)
@@ -53,7 +53,7 @@ VALUES %s
 ON CONFLICT DO NOTHING;
 """
 
-#Actualizar estadisticas
+# Actualizar estadisticas
 UPDATE_STATS_SQL = """
 UPDATE BT.stats
 SET
@@ -64,13 +64,13 @@ SET
 WHERE name = %s;
 """
 
-# Obtener estadisticas desde la Tabla SQL
+# Obtener estadisticas desde la tabla (stats) desde la Tabla SQL
 GET_STATS_SQL = "SELECT cnt, ssum, smin, smax FROM BT.stats WHERE name = %s;"
 
 # Verificar si el archivo .csv ya esta ingestado
 CHECK_FILE_SQL = "SELECT 1 FROM BT.ingestion_log WHERE file_name = %s;"
 
-# Insertar log del archivo ingestado dentro de la tabla ingestion_log
+# Insertar logs del archivo ingestado dentro de la tabla ingestion_log
 LOG_FILE_SQL = """
 INSERT INTO BT.ingestion_log(file_name, rows_loaded, loaded_at)
 VALUES (%s, %s, %s)
@@ -80,7 +80,10 @@ DO UPDATE SET rows_loaded = EXCLUDED.rows_loaded,
 """
 
 
-# Queries para crear tablas
+# Queries sql para crear tablas
+# Tabla transaction: Permite almacenar los registros tal cual vienen de los archivos .csv
+# Tabla stats: Permite almacenar las estadisticas incrementales que se van actulizndo  cada vez que se carga un batch
+# Tabla ingestion_log: Permite almacenar los archivos ingestados, para que la proxima vez que se ejecute el script no se dupliquen los datos
 DDL = {
     "transactions": """
         CREATE TABLE IF NOT EXISTS BT.transactions (
@@ -116,7 +119,7 @@ DDL = {
 
 """
 Esta funcioón permite crear tablas necesarias dentro de postgres 
-e inicializa fila dentr 1 de la tabla estadísticas.
+e inicializa fila dentro 1 de la tabla estadísticas.
 """
 
 def init_db(conn):
@@ -153,7 +156,7 @@ def truncate_tables(conn):
         
 
 
-""" Esta función permite buscar archivos de origen 2012-*.csv
+""" Esta función permite buscar archivos de origen 2012-*.csv dentro de la carpeta datos
       (excluyendo validation)."""
       
 def find_source_files(directory):
@@ -166,8 +169,9 @@ def find_source_files(directory):
 
 
 """
-Esta función permite convertir cada  fila CSV en (timestamp, price, user_id)
+Esta función permite convertir cada  fila  de los arcivos CSV en (timestamp, price, user_id)
 en el formato de datos correcto para realizar el cargue en la base de datos
+aqui se realiza conversion de datos y se tratan datos vacios
 """
 def parse_row(row):
 
@@ -195,7 +199,7 @@ def parse_row(row):
 """
 Esta función permite:
 - Procesar cada uno de los archivos(CSV) en microbatches
-- permite actualziar las estadisticas dentro de la tabla  stats
+- permite actualizar las estadisticas dentro de la tabla  stats
 
 Entradas:
     - Tamaño del Lote (Batch): defecto (100)  se peude ajustar (1, cada fila es un lote)
@@ -214,9 +218,9 @@ def process_file(conn, filepath, source_file_name, microbatch_size=100):
         cur.close()
         return 0
 
-
-    inserted_total = 0
-    batch, batch_prices = [], []
+    # Variables generales 
+    inserted_total = 0                       # registros insertados
+    batch, batch_prices = [], []             # Litas que almacenan tuplas para la actulizacion dentro tabla transactions
 
     with open(filepath, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -231,7 +235,7 @@ def process_file(conn, filepath, source_file_name, microbatch_size=100):
             
             # Se agrega c/d fila en formato de tupla (4) a la lista batch
             batch.append((ts, price, user_id, source_file_name))
-            # Dentro de la lista batch_prices se agrega el precio de c/d registro para posteriores calculos.
+            # Dentro de la lista batch_prices se agrega el precio de c/d registro para posteriores calculos (sum, min,max, avg).
             batch_prices.append(price)
             
             # Se garantiza que se ejecute el proceso de acuerdo al tamaño de cada batch, no todo el archivo a la vez
@@ -245,7 +249,7 @@ def process_file(conn, filepath, source_file_name, microbatch_size=100):
         flush_batch(conn, cur, batch, batch_prices)
         inserted_total += len(batch)
 
-    # Registrar archivo
+    # Una vez procesado todos los batchs de cada archivo, se almacena dentro de la tabla ingestion_log cada archivo procesado
     cur.execute(LOG_FILE_SQL, (source_file_name, inserted_total, datetime.now()))
     conn.commit()
     cur.close()
@@ -261,6 +265,7 @@ Esta función permite insertar un  microbatch dentro de la tabla transactions y 
 def flush_batch(conn, cur, batch, prices):
     # Se inserta la fila dentro de la tabla transactions , deacuerdo a los valores obtenidos
     execute_values(cur, INSERT_TX_SQL, batch, template="(%s, %s, %s, %s)")
+    
     # Se actulizan las estdiasticas de la tabla stats deaceurdo a los datos del batch ingestado
     cur.execute(
         UPDATE_STATS_SQL,
@@ -296,22 +301,25 @@ def print_stats(conn, label=""):
 # Main CLI
 # =======================================================
 def main():
+    # Se definen diferentes argumentos de acuerdo a la tarea a realizar
     parser = argparse.ArgumentParser(description="Pipeline de ingesta de datos en microbatch")
     parser.add_argument("--chunksize", type=int, default=100, help="Número de filas por microbatch")
-    parser.add_argument("--validation", action="store_true", help="Procesar también validation.csv")
+    parser.add_argument("--validation", action="store_true", help="Procesar archivo de validation.csv")
     parser.add_argument("--truncate-tables", action="store_true",
-                        help="Truncar todas las tablas antes del proceso")
+                        help="Truncar todas las tablas de la base de datos")
     args = parser.parse_args()
-
+    # Conexión a la base de datos
     conn = psycopg2.connect(**DB_CONF)
+    # Inicializacion esquema y tablas en caso de que no esten creados
     init_db(conn)
 
     try:
+        # Esta bandera permite truncar las tablas y dejarlas vacias 
         if args.truncate_tables:
             truncate_tables(conn)
             return 
         
-        # caso: correr solo archivo de validación
+        # Este argumento permite ejecutar el archivo validation.csv
         if args.validation:
             val_path = os.path.join(CSV_DIR, "validation.csv")
             if os.path.exists(val_path):
